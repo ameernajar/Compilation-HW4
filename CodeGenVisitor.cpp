@@ -46,12 +46,14 @@ void CodeGenVisitor::visit(ast::Num &node) {
     // string var = buffer.freshVar();
     // buffer << var << " = add i32 0, " << node.value << std::endl;
     lastReg = std::to_string(node.value);
+    lastValue = node.value;
     return;
 }
 
 void CodeGenVisitor::visit(ast::NumB &node) {
     lastType = ast::BuiltInType::BYTE;
     lastReg = std::to_string(node.value);
+    lastValue = node.value;
     return;
 }
 
@@ -77,6 +79,8 @@ void CodeGenVisitor::visit(ast::ID &node) {
 
     lastType = result.type;
     lastReg = currentScope->varToReg[node.value];
+    // lastValue = value of the ID if its a variable,
+    //    which we can get via storing it in an additional field in the VarInfo class
 }
 
 void verifyFuncNotUsedAsVar(ast::Node &node, shared_ptr<Scope> &currentScope) {
@@ -92,25 +96,35 @@ void CodeGenVisitor::visit(ast::BinOp &node) {
     node.left->accept(*this);
     const ast::BuiltInType leftType = lastType;
     string leftReg = lastReg;
+    int leftValue = lastValue;
 
     node.right->accept(*this);
     const ast::BuiltInType rightType = lastType;
     string rightReg = lastReg;
+    int rightValue = lastValue;
 
     // LLVM IR stuff
     string var = buffer.freshVar();
     switch (node.op) {
     case ast::BinOpType::ADD:
         buffer << var << " = add ";
+        lastValue = leftValue + rightValue;
         break;
     case ast::BinOpType::SUB:
         buffer << var << " = sub ";
+        lastValue = leftValue - rightValue;
         break;
     case ast::BinOpType::MUL:
         buffer << var << " = mul ";
+        lastValue = leftValue * rightValue;
         break;
     case ast::BinOpType::DIV:
         buffer << var << " = sdiv ";
+        if (rightValue == 0) {
+            cout << "Error division by zero" << std::endl;
+            exit(0);
+        }
+        lastValue = leftValue / rightValue;
         break;
     }
     if (leftType == ast::BuiltInType::INT || rightType == ast::BuiltInType::INT) {
