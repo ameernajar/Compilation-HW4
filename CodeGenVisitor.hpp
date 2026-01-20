@@ -72,6 +72,7 @@ class CodeGenVisitor : public Visitor {
     shared_ptr<Scope> currentScope = make_shared<Scope>(nullptr);
     ast::BuiltInType lastType;
     string lastReg;
+    int lastValue;
 
     void getFuncs();
 
