@@ -92,15 +92,15 @@ void verifyFuncNotUsedAsVar(ast::Node &node, shared_ptr<Scope> &currentScope) {
     }
 }
 
-void CodeGenVisitor::divByZeroCheck(const std::string& rhs) {
+void CodeGenVisitor::divByZeroCheck(const std::string &rhs) {
     std::string isZero = buffer.freshVar();
     buffer << isZero << " = icmp eq i32 " << rhs << ", 0\n";
 
     std::string errLbl = buffer.freshLabel();
-    std::string okLbl  = buffer.freshLabel();
-    buffer << "br i1 " << condI1 << ", label " << tLbl << ", label " << fLbl << "\n";
+    std::string okLbl = buffer.freshLabel();
+    buffer << "br i1 " << isZero << ", label " << errLbl << ", label " << okLbl << "\n";
 
-    emitLabel(errLbl);
+    buffer.emitLabel(errLbl);
     const std::string msg = "Error division by zero";
     std::string g = buffer.emitString(msg);
     std::string p = buffer.freshVar();
@@ -110,9 +110,13 @@ void CodeGenVisitor::divByZeroCheck(const std::string& rhs) {
     buffer << "call void @print(i8* " << p << ")\n";
     buffer << "call void @exit(i32 0)\n";
 
-    emitLabel(okLbl);
+    buffer.emitLabel(okLbl);
 }
-
+std::string maskByte(const std::string &i32reg, output::CodeBuffer &buffer) {
+    std::string r = buffer.freshVar();
+    buffer << r << " = and i32 " << i32reg << ", 255\n";
+    return r;
+}
 void CodeGenVisitor::visit(ast::BinOp &node) {
     node.left->accept(*this);
     const ast::BuiltInType leftType = lastType;
@@ -124,6 +128,7 @@ void CodeGenVisitor::visit(ast::BinOp &node) {
     string rightReg = lastReg;
     int rightValue = lastValue;
 
+    bool isInt = leftType == ast::BuiltInType::INT || rightType == ast::BuiltInType::INT;
     // LLVM IR stuff
     string var = buffer.freshVar();
     switch (node.op) {
@@ -140,20 +145,24 @@ void CodeGenVisitor::visit(ast::BinOp &node) {
         lastValue = leftValue * rightValue;
         break;
     case ast::BinOpType::DIV:
-        checkDivByZero(rightReg)
-        buffer << var << " = sdiv ";
+        divByZeroCheck(rightReg);
         if (rightValue == 0) {
             cout << "Error division by zero" << std::endl;
             exit(0);
         }
+        if (isInt)
+            buffer << var << " = sdiv ";
+        else
+            buffer << var << " = udiv ";
         lastValue = leftValue / rightValue;
         break;
     }
-    if (leftType == ast::BuiltInType::INT || rightType == ast::BuiltInType::INT) {
+    if (isInt) {
         buffer << "i32 " << leftReg << ", " << rightReg << std::endl;
         lastType = ast::BuiltInType::INT;
     } else {
         buffer << "i8 " << leftReg << ", " << rightReg << std::endl;
+        string maskedVar = maskByte(var, buffer);
         lastType = ast::BuiltInType::BYTE;
     }
     lastReg = var;
@@ -162,20 +171,50 @@ void CodeGenVisitor::visit(ast::BinOp &node) {
 void CodeGenVisitor::visit(ast::RelOp &node) {
     node.left->accept(*this);
     const ast::BuiltInType leftType = lastType;
-
-    verifyFuncNotUsedAsVar(*node.left, currentScope);
-
-    if (!isNumericType(leftType))
-        output::errorMismatch(node.line);
+    string leftReg = lastReg;
 
     node.right->accept(*this);
     const ast::BuiltInType rightType = lastType;
+    string rightReg = lastReg;
 
-    verifyFuncNotUsedAsVar(*node.right, currentScope);
+    bool isInt = leftType == ast::BuiltInType::INT || rightType == ast::BuiltInType::INT;
 
-    if (!isNumericType(rightType))
-        output::errorMismatch(node.line);
-
+    string var = buffer.freshVar();
+    buffer << var << " = icmp ";
+    switch (node.op) {
+    case ast::RelOpType::EQ:
+        buffer << "eq ";
+        break;
+    case ast::RelOpType::NE:
+        buffer << "ne ";
+        break;
+    case ast::RelOpType::LT:
+        if (isInt)
+            buffer << "slt ";
+        else
+            buffer << "ult ";
+        break;
+    case ast::RelOpType::GT:
+        if (isInt)
+            buffer << "sgt ";
+        else
+            buffer << "ugt ";
+        break;
+    case ast::RelOpType::LE:
+        if (isInt)
+            buffer << "sle ";
+        else
+            buffer << "ule ";
+        break;
+    case ast::RelOpType::GE:
+        if (isInt)
+            buffer << "sge ";
+        else
+            buffer << "uge ";
+        break;
+    }
+    buffer << "i32 " << leftReg << ", " << rightReg << std::endl;
+    lastReg = var;
     lastType = ast::BuiltInType::BOOL;
 }
 
@@ -183,10 +222,10 @@ void CodeGenVisitor::visit(ast::Not &node) {
     node.exp->accept(*this);
     const ast::BuiltInType expType = lastType;
 
-    // TODO: not sure if we need to check func as var here
-
-    if (expType != ast::BuiltInType::BOOL)
-        output::errorMismatch(node.line);
+    // verified as bool from semantic visitor
+    string var = buffer.freshVar();
+    buffer << var << " = xor i32 " << lastReg << ", 1" << std::endl;
+    lastReg = var;
 
     lastType = ast::BuiltInType::BOOL;
 }
@@ -194,38 +233,32 @@ void CodeGenVisitor::visit(ast::Not &node) {
 void CodeGenVisitor::visit(ast::And &node) {
     node.left->accept(*this);
     const ast::BuiltInType leftType = lastType;
-
-    verifyFuncNotUsedAsVar(*node.left, currentScope);
-
-    if (leftType != ast::BuiltInType::BOOL)
-        output::errorMismatch(node.line);
+    const string leftReg = lastReg;
 
     node.right->accept(*this);
     const ast::BuiltInType rightType = lastType;
+    const string rightReg = lastReg;
 
-    verifyFuncNotUsedAsVar(*node.right, currentScope);
+    string var = buffer.freshVar();
+    buffer << var << " = and i32 " << leftReg << ", " << rightReg << std::endl;
+    lastReg = var;
 
-    if (rightType != ast::BuiltInType::BOOL)
-        output::errorMismatch(node.line);
     lastType = ast::BuiltInType::BOOL;
 }
 
 void CodeGenVisitor::visit(ast::Or &node) {
     node.left->accept(*this);
     const ast::BuiltInType leftType = lastType;
-
-    verifyFuncNotUsedAsVar(*node.left, currentScope);
-
-    if (leftType != ast::BuiltInType::BOOL)
-        output::errorMismatch(node.line);
+    const string leftReg = lastReg;
 
     node.right->accept(*this);
     const ast::BuiltInType rightType = lastType;
+    const string rightReg = lastReg;
 
-    verifyFuncNotUsedAsVar(*node.right, currentScope);
+    string var = buffer.freshVar();
+    buffer << var << " = or i32 " << leftReg << ", " << rightReg << std::endl;
+    lastReg = var;
 
-    if (rightType != ast::BuiltInType::BOOL)
-        output::errorMismatch(node.line);
     lastType = ast::BuiltInType::BOOL;
 }
 
@@ -233,34 +266,41 @@ void CodeGenVisitor::visit(ast::Type &node) {
     lastType = node.type;
 }
 
-bool checkLegalCast(ast::BuiltInType from, ast::BuiltInType to, ast::BuiltInType &lastType) {
-    // casting from or to anything other than int or byte is illegal
-    /*
-    legal casts:
-        int->int
-        int->byte
-        byte->int
-        byte->byte
-    */
-    if (from != ast::BuiltInType::INT && from != ast::BuiltInType::BYTE)
-        return false;
-
-    if (to == ast::BuiltInType::INT || to == ast::BuiltInType::BYTE) {
-        lastType = to;
-        return true;
-    }
-
-    return false;
-}
-
 void CodeGenVisitor::visit(ast::Cast &node) {
     node.exp->accept(*this);
     const ast::BuiltInType expType = lastType;
+    if (expType == ast::BuiltInType::INT && node.target_type->type == ast::BuiltInType::BYTE) {
+        string lastReg = maskByte(lastReg, buffer);
+        lastType = ast::BuiltInType::BYTE;
+        return;
+    }
+    lastType = node.target_type->type;
+    /*
 
-    verifyFuncNotUsedAsVar(*node.exp, currentScope);
 
-    if (!checkLegalCast(expType, node.target_type->type, lastType))
-        output::errorMismatch(node.line);
+
+
+
+
+
+
+
+
+
+
+
+    TODO: we stopped here
+
+
+
+
+
+
+
+
+
+
+    */
 }
 
 void CodeGenVisitor::visit(ast::ExpList &node) {
