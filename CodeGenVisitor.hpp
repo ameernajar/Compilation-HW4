@@ -137,4 +137,6 @@ public:
     void visit(ast::FuncDecl &node) override;
 
     void visit(ast::Funcs &node) override;
-};
+
+    void CodeGenVisitor::divByZeroCheck(const std::string& rhsI32);
+    };

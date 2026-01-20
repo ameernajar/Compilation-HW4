@@ -88,6 +88,27 @@ void verifyFuncNotUsedAsVar(ast::Node &node, shared_ptr<Scope> &currentScope) {
     }
 }
 
+void CodeGenVisitor::divByZeroCheck(const std::string& rhs) {
+    std::string isZero = buffer.freshVar();
+    buffer << isZero << " = icmp eq i32 " << rhs << ", 0\n";
+
+    std::string errLbl = buffer.freshLabel();
+    std::string okLbl  = buffer.freshLabel();
+    buffer << "br i1 " << condI1 << ", label " << tLbl << ", label " << fLbl << "\n";
+
+    emitLabel(errLbl);
+    const std::string msg = "Error division by zero";
+    std::string g = buffer.emitString(msg);
+    std::string p = buffer.freshVar();
+    int n = (int)msg.size() + 1;
+    buffer << p << " = getelementptr [" << n << " x i8], [" << n << " x i8]* "
+           << g << ", i32 0, i32 0\n";
+    buffer << "call void @print(i8* " << p << ")\n";
+    buffer << "call void @exit(i32 0)\n";
+
+    emitLabel(okLbl);
+}
+
 void CodeGenVisitor::visit(ast::BinOp &node) {
     node.left->accept(*this);
     const ast::BuiltInType leftType = lastType;
@@ -110,6 +131,7 @@ void CodeGenVisitor::visit(ast::BinOp &node) {
         buffer << var << " = mul ";
         break;
     case ast::BinOpType::DIV:
+        checkDivByZero(rightReg)
         buffer << var << " = sdiv ";
         break;
     }
