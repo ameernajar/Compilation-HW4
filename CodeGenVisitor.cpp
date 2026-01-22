@@ -304,54 +304,69 @@ void CodeGenVisitor::visit(ast::Cast &node) {
 }
 
 void CodeGenVisitor::visit(ast::ExpList &node) {
+    size_t argIndex = 0;
     for (const auto &exp : node.exps) {
         exp->accept(*this);
+        currentScope->varToReg["__arg" + std::to_string(argIndex)] = lastReg;
+        argIndex++;
     }
-}
-
-string toCaps(const string &str) {
-    string res = str;
-    for (int i = 0; i < str.length(); i++) {
-        if (islower(str[i]))
-            res[i] = toupper(res[i]);
-    }
-    return res;
 }
 
 void CodeGenVisitor::visit(ast::Call &node) {
     const auto findResult = currentScope->find(node.func_id->value);
-    if (!findResult.found) {
-        output::errorUndefFunc(node.line, node.func_id->value);
-    }
-    if (findResult.idType != IdType::FUNC) {
-        output::errorDefAsVar(node.line, node.func_id->value);
-    }
+    // garaunteed to be a function from semantic analysis
     const auto &funcInfo = *findResult.info.func;
-    vector<ast::BuiltInType> argTypes;
     if (node.args) {
-        for (const auto &arg : node.args->exps) {
-            arg->accept(*this);
-            argTypes.push_back(lastType);
-        }
+        node.args->accept(*this);
     }
 
-    // cast param types to string for error message
-    vector<string> paramTypes;
-    for (const auto &type : funcInfo.params)
-        paramTypes.push_back(toCaps(output::typeToString(type)));
-
-    // check parameter count and types
-    if (argTypes.size() != funcInfo.params.size())
-        output::errorPrototypeMismatch(node.line, node.func_id->value, paramTypes);
-
-    for (size_t i = 0; i < argTypes.size(); ++i) {
-        // checking if we can also cast, not only explicit type match.
-        // Also, lastType updating here in checkLegalCast is overwritten later so no need for it.
-        if (argTypes[i] != funcInfo.params[i]) {
-            if (!checkLegalCast(argTypes[i], funcInfo.params[i], lastType))
-                output::errorPrototypeMismatch(node.line, node.func_id->value, paramTypes);
-        }
+    // emit call
+    string callReg = buffer.freshVar();
+    buffer << callReg << " = call ";
+    ;
+    switch (funcInfo.ret) {
+    case ast::BuiltInType::INT:
+        buffer << "i32 ";
+        break;
+    // case ast::BuiltInType::BYTE:
+    //     buffer << "i8 ";
+    //     break;
+    // case ast::BuiltInType::BOOL:
+    //     buffer << "i1 ";
+    //     break;
+    case ast::BuiltInType::STRING:
+        buffer << "i8* ";
+        break;
+    case ast::BuiltInType::VOID:
+        buffer << "void ";
+        break;
     }
+    buffer << "@" << node.func_id->value << "(";
+    for (size_t i = 0; i < funcInfo.params.size(); i++) {
+        if (i > 0)
+            buffer << ", ";
+        switch (funcInfo.params[i]) {
+        case ast::BuiltInType::INT:
+            buffer << "i32 ";
+            break;
+        // case ast::BuiltInType::BYTE:
+        //     buffer << "i8 ";
+        //     break;
+        // case ast::BuiltInType::BOOL:
+        //     buffer << "i1 ";
+        //     break;
+        case ast::BuiltInType::STRING:
+            buffer << "i8* ";
+            break;
+        case ast::BuiltInType::VOID:
+            // should not happen
+            break;
+        }
+        buffer << currentScope->varToReg["__arg" + std::to_string(i)];
+    }
+    buffer << ")" << std::endl;
+    lastReg = callReg;
+
     lastType = funcInfo.ret;
 }
 

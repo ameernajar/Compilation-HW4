@@ -47,11 +47,9 @@ public:
     std::unordered_map<std::string, FuncInfo> funcsMap;
     std::unordered_map<std::string, VarInfo> varsMap;
     std::unordered_map<std::string, string> varToReg;
-    size_t offset;
     shared_ptr<Scope> parentScope;
     bool isLoopScope = false;
     Scope(shared_ptr<Scope> parentScope) : funcsMap(), varsMap(),
-                                           offset(parentScope ? parentScope->offset : 0),
                                            parentScope(parentScope),
                                            isLoopScope(parentScope ? parentScope->isLoopScope : false) {}
 
@@ -139,5 +137,5 @@ public:
 
     void visit(ast::Funcs &node) override;
 
-    void CodeGenVisitor::divByZeroCheck(const std::string& rhsI32);
-    };
+    void CodeGenVisitor::divByZeroCheck(const std::string &rhsI32);
+};
