@@ -3,9 +3,27 @@
 // Created by amirn on 12/19/2025.
 //
 
-bool isNumericType(ast::BuiltInType type) {
-    return type == ast::BuiltInType::INT || type == ast::BuiltInType::BYTE;
+void CodeGenVisitor::emitLabel(const std::string& labelName) {
+    buffer.emitLabel(labelName);
+    blockTerminated = false;
 }
+
+void CodeGenVisitor::emitBr(const std::string& labelName) {
+    buffer << "br label " << labelName << "\n";
+    blockTerminated = true;
+}
+
+void CodeGenVisitor::emitCondBr(const std::string& condI1,
+                                const std::string& trueLabel,
+                                const std::string& falseLabel) {
+    buffer << "br i1 " << condI1 << ", label " << trueLabel << ", label " << falseLabel << "\n";
+    blockTerminated = true;
+}
+
+
+/*bool isNumericType(ast::BuiltInType type) {
+    return type == ast::BuiltInType::INT || type == ast::BuiltInType::BYTE;
+}*/
 
 // NOTE: duplicated from previous HW
 // void CodeGenVisitor::getFuncs() {
@@ -74,16 +92,23 @@ void CodeGenVisitor::visit(ast::Bool &node) {
 
 void CodeGenVisitor::visit(ast::ID &node) {
     auto result = currentScope->find(node.value);
-    if (!result.found)
-        output::errorUndef(node.line, node.value);
+    /*result ensured to be found from semnatic analysis*/
+
 
     lastType = result.type;
     lastReg = currentScope->varToReg[node.value];
+
+    std::string p = buffer.freshVar();
+    buffer << p << " = getelementptr [50 x i32], [50 x i32]* " << lastReg
+           << ", i32 0, i32 " << lastReg << "\n";
+    string loadVar = buffer.freshVar();
+    buffer << loadVar << " = load i32, i32* " << p << "\n";
+    lastReg = loadVar;
     // lastValue = value of the ID if its a variable,
-    //    which we can get via storing it in an additional field in the VarInfo class
+    //    which we can get via storing it in an additional field in VarInfo class
 }
 
-void verifyFuncNotUsedAsVar(ast::Node &node, shared_ptr<Scope> &currentScope) {
+void verifyFuncNotUsedAsVar(ast::Node &node, shared_ptr<GenCodeScope> &currentScope) {
     if (auto func = dynamic_cast<ast::ID *>(&node)) {
         const auto findResult = currentScope->find(func->value);
         if (findResult.found && findResult.idType == IdType::FUNC) {
@@ -235,31 +260,66 @@ void CodeGenVisitor::visit(ast::And &node) {
     const ast::BuiltInType leftType = lastType;
     const string leftReg = lastReg;
 
+    string trueLabel = buffer.freshLabel();
+    string falseLabel = buffer.freshLabel();
+    string endLabel = buffer.freshLabel();
+
+    emitCondBr(leftReg, trueLabel, falseLabel);
+    emitLabel(falseLabel);
+    emitBr(endLabel);
+
+    emitLabel(trueLabel);
     node.right->accept(*this);
     const ast::BuiltInType rightType = lastType;
     const string rightReg = lastReg;
+    emitBr(endLabel);
 
-    string var = buffer.freshVar();
-    buffer << var << " = and i32 " << leftReg << ", " << rightReg << std::endl;
-    lastReg = var;
-
+    emitLabel(endLabel);
+    string phiVar = buffer.freshVar();
+    buffer << phiVar << " = phi i1 [0, " << falseLabel << "], [" << rightReg << ", " << trueLabel << "]\n";    
+    string phi =  buffer.freshVar();
+    buffer << phi << " = zext i1 " << phiVar << " to i32\n";
+    lastReg = phi;
     lastType = ast::BuiltInType::BOOL;
 }
+
+
+    /*this doesn't implement short-circuit evaluation*/
+    /*string var = buffer.freshVar();
+    buffer << var << " = and i32 " << leftReg << ", " << rightReg << std::endl;
+    lastReg = var;*/
+
+    
 
 void CodeGenVisitor::visit(ast::Or &node) {
     node.left->accept(*this);
     const ast::BuiltInType leftType = lastType;
     const string leftReg = lastReg;
+    string trueLabel = buffer.freshLabel();
+    string falseLabel = buffer.freshLabel();
+    string endLabel = buffer.freshLabel();
+    emitCondBr(leftReg, trueLabel, falseLabel);
+    emitLabel(trueLabel);
+    emitBr(endLabel);
 
+    emitLabel(falseLabel);
     node.right->accept(*this);
     const ast::BuiltInType rightType = lastType;
     const string rightReg = lastReg;
+    emitBr(endLabel);
 
-    string var = buffer.freshVar();
-    buffer << var << " = or i32 " << leftReg << ", " << rightReg << std::endl;
-    lastReg = var;
-
+    emitLabel(endLabel);
+    string phiVar = buffer.freshVar();
+    buffer << phiVar << " = phi i1 [1, " << trueLabel << "], [" << rightReg << ", " << falseLabel << "]\n";    
+    string phi =  buffer.freshVar();    
+    buffer << phi << " = zext i1 " << phiVar << " to i32\n";
+    lastReg = phi;  
     lastType = ast::BuiltInType::BOOL;
+
+    /*this doesn't implement short-circuit evaluation*/
+    /*string var = buffer.freshVar();
+    buffer << var << " = or i32 " << leftReg << ", " << rightReg << std::endl;
+    lastReg = var;*/
 }
 
 void CodeGenVisitor::visit(ast::Type &node) {
@@ -372,31 +432,48 @@ void CodeGenVisitor::visit(ast::Call &node) {
 
 void CodeGenVisitor::visit(ast::Statements &node) {
     // TODO: check scopes
+
+    /*didn't know what to do here*/
     for (const auto &statement : node.statements) {
+        if(!canEmit()) {
+            break;
+        }
         visitStatement(*statement);
     }
 }
 
 void CodeGenVisitor::visit(ast::Break &node) {
-    if (!currentScope->isLoopScope)
-        output::errorUnexpectedBreak(node.line);
+    if(!canEmit()) {
+        return;
+    }
+    emitBr(loopStack.back().second);
 }
 
 void CodeGenVisitor::visit(ast::Continue &node) {
-    if (!currentScope->isLoopScope)
-        output::errorUnexpectedContinue(node.line);
+    if(!canEmit()) {
+        return;
+    }
+    emitBr(loopStack.back().first);
 }
 
 void CodeGenVisitor::visit(ast::Return &node) {
-    if (node.exp) {
-        node.exp->accept(*this);
+    if(!canEmit()) {
+        return;
     }
+    if(!node.exp) {
+        buffer << "ret void\n";
+        blockTerminated = true;
+        return;
+    } 
+    node.exp->accept(*this);
+    buffer << "ret i32 " << lastReg << "\n";
+    blockTerminated = true;
 }
 
 void CodeGenVisitor::visitStatement(ast::Statement &node) {
     try {
         ast::Statements &stmtNode = dynamic_cast<ast::Statements &>(node);
-        currentScope = make_shared<Scope>(currentScope);
+        currentScope = make_shared<GenCodeScope>(currentScope);
 
         stmtNode.accept(*this);
 
@@ -407,94 +484,148 @@ void CodeGenVisitor::visitStatement(ast::Statement &node) {
 }
 
 void CodeGenVisitor::visit(ast::If &node) {
+    if (!canEmit()) {
+        return;
+    }
+
     node.condition->accept(*this);
-    const ast::BuiltInType condType = lastType;
+    //const ast::BuiltInType condType = lastType;
 
-    if (condType != ast::BuiltInType::BOOL)
-        output::errorMismatch(node.line);
+    std::string condI1 = buffer.freshVar();
+    buffer << condI1 << " = icmp ne i32 " << lastReg << ", 0\n";
+    std::string thenLabel = buffer.freshLabel();
+    std::string elseLabel = buffer.freshLabel();
+    std::string endLabel = buffer.freshLabel();
+    if(node.otherwise) {
+        emitCondBr(condI1, thenLabel, elseLabel);
+    } else {
+        emitCondBr(condI1, thenLabel, endLabel);
+    }
 
-    currentScope = make_shared<Scope>(currentScope);
+
+    emitLabel(thenLabel);
+    currentScope = make_shared<GenCodeScope>(currentScope);
     visitStatement(*node.then);
     currentScope = currentScope->parentScope;
-    if (node.otherwise) {
-        currentScope = make_shared<Scope>(currentScope);
-        visitStatement(*node.otherwise);
-        currentScope = currentScope->parentScope;
+    if(canEmit()) {
+        emitBr(endLabel);
     }
+
+    if (node.otherwise) {
+        emitLabel(elseLabel);
+        currentScope = make_shared<GenCodeScope>(currentScope);
+        visitStatement(*node.otherwise);        
+        currentScope = currentScope->parentScope;
+        if(canEmit()) {
+            emitBr(endLabel);
+        }
+    } else {
+        emitLabel(endLabel);
+    }
+
 }
 
 void CodeGenVisitor::visit(ast::While &node) {
+    if (!canEmit()) {
+        return;
+    }
+    std::string condLabel = buffer.freshLabel();
+    std::string bodyLabel = buffer.freshLabel();
+    std::string endLabel = buffer.freshLabel();
+    emitBr(condLabel);
+    emitLabel(condLabel);
+
     node.condition->accept(*this);
-    const ast::BuiltInType condType = lastType;
-
-    if (condType != ast::BuiltInType::BOOL)
-        output::errorMismatch(node.line);
-
-    currentScope = make_shared<Scope>(currentScope);
-    currentScope->isLoopScope = true;
-    visitStatement(*node.body);
+    string condI1 = buffer.freshVar();
+    buffer << condI1 << " = icmp ne i32 " << lastReg << ", 0\n";
+    emitCondBr(condI1, bodyLabel, endLabel);
+    
+    emitLabel(bodyLabel);
+    loopStack.push_back({condLabel, endLabel});
+    currentScope = make_shared<GenCodeScope>(currentScope);
+    node.body->accept(*this);
     currentScope = currentScope->parentScope;
+    loopStack.pop_back();
+    if (canEmit()) {
+        emitBr(condLabel);
+    }
+    emitLabel(endLabel);
+    
 }
 
-bool isAssignable(ast::BuiltInType dst, ast::BuiltInType src) {
+/*bool isAssignable(ast::BuiltInType dst, ast::BuiltInType src) {
     if (dst == src)
         return true;
     if (dst == ast::BuiltInType::INT && src == ast::BuiltInType::BYTE)
         return true;
     return false;
-}
+}*/
 
 void CodeGenVisitor::visit(ast::VarDecl &node) {
-    if (currentScope->find(node.id->value).found)
-        output::errorDef(node.line, node.id->value);
+    if(!canEmit()) {
+        return;
+    }
+    GenCodeScope::VarInfo varInfo;
+    varInfo.type = node.type->type;
+    varInfo.offset = int(currentScope->offset);
+    currentScope->varsMap[node.id->value] = varInfo;
+    currentScope->offset += 1;
 
-    ast::BuiltInType initType = ast::BuiltInType::VOID;
+    string varReg = buffer.freshVar();
+    buffer << varReg << " = getelementptr [50 x i32], [50 x i32]* %locals, i32 0, i32 "
+           << varInfo.offset << "\n";
+
+    string initVal = "0";
     if (node.init_exp) {
         node.init_exp->accept(*this);
-        initType = lastType;
-    }
-
-    node.type->accept(*this);
-    auto declType = lastType;
-
-    if (node.init_exp) {
-        if (!isAssignable(declType, initType)) {
-            output::errorMismatch(node.line);
+        initVal = lastReg;
+        if(varInfo.type == ast::BuiltInType::BYTE) {
+            initVal = maskByte(initVal, buffer);
         }
     }
 
-    currentScope->varsMap[node.id->value] = Scope::VarInfo{declType, int(currentScope->offset)};
-    currentScope->offset += 1;
+    buffer << "store i32 " << initVal << ", i32* " << varReg << "\n";
+
+    /*what is this??*/
+    currentScope->varToReg[node.id->value] = varReg;
 }
 
+
+
+
 void CodeGenVisitor::visit(ast::Assign &node) {
+    if(!canEmit()) {
+        return;
+    }
+
+
     const string &id = node.id->value;
     auto result = currentScope->find(id);
-    if (!result.found) {
-        output::errorUndef(node.line, id);
-    }
-    if (result.idType == IdType::FUNC) {
-        output::errorDefAsFunc(node.line, id);
-    }
-    auto dstType = result.type;
+    /*result ensured to be found from semnatic analysis*/
+    /*idType ensured to be var from semantic analysis*/
+    /*no need to check ifAssignable as well*/
+    
     node.exp->accept(*this);
-    auto srcType = lastType;
-    if (!isAssignable(dstType, srcType)) {
-        output::errorMismatch(node.line);
+    string expReg = lastReg;
+    if(result.type == ast::BuiltInType::BYTE) {
+        expReg = maskByte(expReg, buffer);
     }
+    string varReg = currentScope->varToReg[id];
+    buffer << "store i32 " << expReg << ", i32* " << varReg << "\n";
+    
 }
 
 void CodeGenVisitor::visit(ast::Formal &node) {
-    auto paramType = node.type->type;
+    /*auto paramType = node.type->type;
     const string &paramid = node.id->value;
 
     // TODO: get param info add to scopes and emit
     currentScope->varsMap[paramid] = Scope::VarInfo{paramType, int(currentScope->offset) * -1};
-    currentScope->offset++;
+    currentScope->offset++;*/
 }
 
 void CodeGenVisitor::visit(ast::Formals &node) {
-    currentScope->offset = 1; // first param offset
+    /*currentScope->offset = 1; // first param offset
     for (const auto &formal : node.formals) {
         if (currentScope->find(formal->id->value).found) {
             output::errorDef(formal->line, formal->id->value);
@@ -503,30 +634,86 @@ void CodeGenVisitor::visit(ast::Formals &node) {
     }
 
     // reset offset for local variables
-    currentScope->offset = 0;
+    currentScope->offset = 0;*/
 }
 
 void CodeGenVisitor::visit(ast::FuncDecl &node) {
-    // a function is already added in getFuncs
-    // we made sure in getFuncs that no function is defined more than once
+    currentScope = make_shared<GenCodeScope>(currentScope->parentScope);
+    blockTerminated = false;
+    loopStack.clear();
+    lastReg = "";
+    lastType = ast::BuiltInType::VOID;
     const string &func_name = node.id->value;
     auto func = currentScope->funcsMap[func_name];
-    auto retType = func.ret;
-
-    currentScope = make_shared<Scope>(currentScope);
-
-    // visit formals
-    if (node.formals) {
-        node.formals->accept(*this);
+    if(func.ret != ast::BuiltInType::VOID) {
+        buffer << "define i32 @" << func_name << "(";
+    } else {
+        buffer << "define void @" << func_name << "(";
     }
-
+    std::vector<std::pair<string, ast::BuiltInType>> paramRegs;
+    if(node.formals) {
+        for(size_t i = 0; i < node.formals->formals.size(); i++) {
+            if(i > 0) {
+                buffer << ", ";
+            }
+            ast::BuiltInType paramType = node.formals->formals[i]->type->type;
+            string paramReg = buffer.freshVar();
+            paramRegs.push_back({paramReg, paramType});
+            if(paramType == ast::BuiltInType::INT) {
+                buffer << "i32 " << paramReg;
+            } else if(paramType == ast::BuiltInType::STRING) {
+                buffer << "i8* " << paramReg;
+            }
+        }
+    }
+    buffer << ") {\n";
+    buffer << "%locals = alloca [50 x i32]\n";
     node.body->accept(*this);
+    if(!blockTerminated) {
+        if(func.ret == ast::BuiltInType::VOID) {
+            buffer << "ret void\n";
+        } else {
+            buffer << "ret i32 0\n";
+        }  
+        blockTerminated = true;
+    }
+    buffer << "}\n\n";
 
     currentScope = currentScope->parentScope;
 }
 
+void CodeGenVisitor::emitHelperFunctions() {
+    buffer << "declare void @print(i8*)\n";
+    buffer << "declare void @printi(i32)\n";
+    buffer << "declare void @exit(i32)\n\n";
+    buffer << "declare void @printf(i8*, ...)\n\n";
+}
+
+// redundant if we are running semantic analysis before codegen
+/*
+void CodeGenVisitor::collectFuncDecls(ast::Funcs &root) {
+    auto &funcsMap = currentScope->funcsMap;
+
+    // add built-in functions
+    funcsMap["print"] = {ast::BuiltInType::VOID, {ast::BuiltInType::STRING}};
+    funcsMap["printi"] = {ast::BuiltInType::VOID, {ast::BuiltInType::INT}};
+
+    for (const auto &func : root.funcs) {
+        const string &name = func->id->value;
+        vector<ast::BuiltInType> params = {};
+        if (func->formals) {
+            for (const auto &formal : func->formals->formals) {
+                params.push_back(formal->type->type);
+            }
+        }
+
+        funcsMap[name] = {func->return_type->type, params};
+    }
+}*/
+
 void CodeGenVisitor::visit(ast::Funcs &node) {
-    analyze();
+    emitHelperFunctions();
+    //collectFuncDecls(node);
     for (const auto &func : node.funcs) {
         func->accept(*this);
     }

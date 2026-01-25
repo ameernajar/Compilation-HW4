@@ -1,6 +1,12 @@
 #ifndef VISITOR_HPP
 #define VISITOR_HPP
 
+enum IdType
+{
+    VAR,
+    FUNC
+};
+
 namespace ast
 {
     class Num;

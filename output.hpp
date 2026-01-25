@@ -90,6 +90,9 @@ public:
 };
 
 std::ostream &operator<<(std::ostream &os, const CodeBuffer &buffer);
+
+std::string typeToString(const ast::BuiltInType &type);
+
 } // namespace output
 
 #endif // OUTPUT_HPP

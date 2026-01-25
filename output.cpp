@@ -131,4 +131,22 @@ namespace output {
         os << buffer.globalsBuffer.str() << std::endl << buffer.buffer.str();
         return os;
     }
+
+    std::string typeToString(const ast::BuiltInType &type)
+    {
+        switch (type)
+        {
+        case ast::BuiltInType::INT:
+            return "int";
+        case ast::BuiltInType::BYTE:
+            return "byte";
+        case ast::BuiltInType::BOOL:
+            return "bool";
+        case ast::BuiltInType::STRING:
+            return "string";
+        case ast::BuiltInType::VOID:
+            return "void";
+        }
+        return std::string();
+    }
 }

@@ -15,12 +15,7 @@ using std::string;
 using std::vector;
 extern std::shared_ptr<ast::Node> program;
 
-enum IdType {
-    VAR,
-    FUNC
-};
-
-class Scope {
+class GenCodeScope {
 
 public:
     struct FuncInfo {
@@ -47,9 +42,10 @@ public:
     std::unordered_map<std::string, FuncInfo> funcsMap;
     std::unordered_map<std::string, VarInfo> varsMap;
     std::unordered_map<std::string, string> varToReg;
-    shared_ptr<Scope> parentScope;
+    shared_ptr<GenCodeScope> parentScope;
     bool isLoopScope = false;
-    Scope(shared_ptr<Scope> parentScope) : funcsMap(), varsMap(),
+    int offset = 0; // for variables' offsets
+    GenCodeScope(shared_ptr<GenCodeScope> parentScope) : funcsMap(), varsMap(),
                                            parentScope(parentScope),
                                            isLoopScope(parentScope ? parentScope->isLoopScope : false) {}
 
@@ -67,7 +63,7 @@ public:
 
 class CodeGenVisitor : public Visitor {
     output::CodeBuffer buffer;
-    shared_ptr<Scope> currentScope = make_shared<Scope>(nullptr);
+    shared_ptr<GenCodeScope> currentScope = make_shared<GenCodeScope>(nullptr);
     ast::BuiltInType lastType;
     string lastReg;
     int lastValue;
@@ -137,5 +133,23 @@ public:
 
     void visit(ast::Funcs &node) override;
 
-    void CodeGenVisitor::divByZeroCheck(const std::string &rhsI32);
+    void divByZeroCheck(const std::string &rhsI32);
+
+    bool blockTerminated = false;
+
+    // loop stack for break/continue: (condLabel, endLabel)
+    std::vector<std::pair<std::string, std::string>> loopStack;
+
+    // helpers
+    void emitLabel(const std::string& labelName);
+
+    void emitBr(const std::string& labelName);
+
+    void emitCondBr(const std::string& condI1, const std::string& trueLabel, const std::string& falseLabel);
+
+    bool canEmit() const { return !blockTerminated; }
+
+    void emitHelperFunctions();
+
+    //void collectFuncDecls(ast::Funcs& root);
 };
