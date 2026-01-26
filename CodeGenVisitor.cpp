@@ -3,6 +3,16 @@
 // Created by amirn on 12/19/2025.
 //
 
+static std::string llvmRetTy(ast::BuiltInType t) {
+    return (t == ast::BuiltInType::VOID) ? "void" : "i32";
+}
+
+string toI1FromI32(const std::string& i32reg, output::CodeBuffer& buffer) {
+    std::string r = buffer.freshVar();
+    buffer << r << " = icmp ne i32 " << i32reg << ", 0\n";
+    return r; // this is i1 reg
+}
+
 void CodeGenVisitor::emitLabel(const std::string& labelName) {
     buffer.emitLabel(labelName);
     blockTerminated = false;
@@ -13,6 +23,7 @@ void CodeGenVisitor::emitBr(const std::string& labelName) {
     blockTerminated = true;
 }
 
+// If condI1 is true -> trueLabel, else -> falseLabel
 void CodeGenVisitor::emitCondBr(const std::string& condI1,
                                 const std::string& trueLabel,
                                 const std::string& falseLabel) {
@@ -77,6 +88,7 @@ void CodeGenVisitor::visit(ast::NumB &node) {
 
 void CodeGenVisitor::visit(ast::String &node) {
     lastType = ast::BuiltInType::STRING;
+    lastValue = 0;
     const size_t len = node.value.length() + 1;
     string globalName = buffer.emitString(node.value);
     string ptr = buffer.freshVar();
@@ -87,6 +99,7 @@ void CodeGenVisitor::visit(ast::String &node) {
 
 void CodeGenVisitor::visit(ast::Bool &node) {
     lastType = ast::BuiltInType::BOOL;
+    lastValue = node.value ? 1 : 0;
     lastReg = node.value ? "1" : "0";
 }
 
@@ -94,16 +107,13 @@ void CodeGenVisitor::visit(ast::ID &node) {
     auto result = currentScope->find(node.value);
     /*result ensured to be found from semnatic analysis*/
 
-
     lastType = result.type;
-    lastReg = currentScope->varToReg[node.value];
+    string p = currentScope->findVarReg(node.value);
 
-    std::string p = buffer.freshVar();
-    buffer << p << " = getelementptr [50 x i32], [50 x i32]* " << lastReg
-           << ", i32 0, i32 " << lastReg << "\n";
     string loadVar = buffer.freshVar();
     buffer << loadVar << " = load i32, i32* " << p << "\n";
     lastReg = loadVar;
+    lastValue = 0;
     // lastValue = value of the ID if its a variable,
     //    which we can get via storing it in an additional field in VarInfo class
 }
@@ -124,6 +134,7 @@ void CodeGenVisitor::divByZeroCheck(const std::string &rhs) {
     std::string errLbl = buffer.freshLabel();
     std::string okLbl = buffer.freshLabel();
     buffer << "br i1 " << isZero << ", label " << errLbl << ", label " << okLbl << "\n";
+    blockTerminated = true;
 
     buffer.emitLabel(errLbl);
     const std::string msg = "Error division by zero";
@@ -134,9 +145,11 @@ void CodeGenVisitor::divByZeroCheck(const std::string &rhs) {
            << g << ", i32 0, i32 0\n";
     buffer << "call void @print(i8* " << p << ")\n";
     buffer << "call void @exit(i32 0)\n";
+    buffer << "unreachable\n";
 
     buffer.emitLabel(okLbl);
 }
+
 std::string maskByte(const std::string &i32reg, output::CodeBuffer &buffer) {
     std::string r = buffer.freshVar();
     buffer << r << " = and i32 " << i32reg << ", 255\n";
@@ -257,28 +270,29 @@ void CodeGenVisitor::visit(ast::Not &node) {
 
 void CodeGenVisitor::visit(ast::And &node) {
     node.left->accept(*this);
-    const ast::BuiltInType leftType = lastType;
-    const string leftReg = lastReg;
 
+    const string leftReg = toI1FromI32(lastReg, buffer);
+
+    string rhsLabel = buffer.freshLabel();
     string trueLabel = buffer.freshLabel();
     string falseLabel = buffer.freshLabel();
     string endLabel = buffer.freshLabel();
 
-    emitCondBr(leftReg, trueLabel, falseLabel);
+    emitCondBr(leftReg, rhsLabel, falseLabel);
     emitLabel(falseLabel);
     emitBr(endLabel);
 
-    emitLabel(trueLabel);
+    emitLabel(rhsLabel);
     node.right->accept(*this);
-    const ast::BuiltInType rightType = lastType;
-    const string rightReg = lastReg;
+    const string rightReg = toI1FromI32(lastReg, buffer);
+    emitCondBr(rightReg, trueLabel, falseLabel);
+
+    emitLabel(trueLabel);
     emitBr(endLabel);
 
     emitLabel(endLabel);
-    string phiVar = buffer.freshVar();
-    buffer << phiVar << " = phi i1 [0, " << falseLabel << "], [" << rightReg << ", " << trueLabel << "]\n";    
-    string phi =  buffer.freshVar();
-    buffer << phi << " = zext i1 " << phiVar << " to i32\n";
+    string phi = buffer.freshVar();
+    buffer << phi << " = phi i32 [0, " << falseLabel << "], [1" << ", " << trueLabel << "]\n";
     lastReg = phi;
     lastType = ast::BuiltInType::BOOL;
 }
@@ -293,26 +307,28 @@ void CodeGenVisitor::visit(ast::And &node) {
 
 void CodeGenVisitor::visit(ast::Or &node) {
     node.left->accept(*this);
-    const ast::BuiltInType leftType = lastType;
-    const string leftReg = lastReg;
+
+    const string leftReg = toI1FromI32(lastReg, buffer);
+    string rhsLabel = buffer.freshLabel();
     string trueLabel = buffer.freshLabel();
     string falseLabel = buffer.freshLabel();
     string endLabel = buffer.freshLabel();
-    emitCondBr(leftReg, trueLabel, falseLabel);
+    emitCondBr(leftReg, trueLabel, rhsLabel);
     emitLabel(trueLabel);
     emitBr(endLabel);
 
-    emitLabel(falseLabel);
+    emitLabel(rhsLabel);
     node.right->accept(*this);
-    const ast::BuiltInType rightType = lastType;
-    const string rightReg = lastReg;
+    const string rightReg = toI1FromI32(lastReg, buffer);
+    emitCondBr(rightReg, trueLabel, falseLabel);
+
+    emitLabel(falseLabel);
     emitBr(endLabel);
 
     emitLabel(endLabel);
-    string phiVar = buffer.freshVar();
-    buffer << phiVar << " = phi i1 [1, " << trueLabel << "], [" << rightReg << ", " << falseLabel << "]\n";    
-    string phi =  buffer.freshVar();    
-    buffer << phi << " = zext i1 " << phiVar << " to i32\n";
+    string phi = buffer.freshVar();
+    buffer << phi << " = phi i32 [1, " << trueLabel << "], [0, " << falseLabel << "]\n";    
+    
     lastReg = phi;  
     lastType = ast::BuiltInType::BOOL;
 
@@ -491,8 +507,7 @@ void CodeGenVisitor::visit(ast::If &node) {
     node.condition->accept(*this);
     //const ast::BuiltInType condType = lastType;
 
-    std::string condI1 = buffer.freshVar();
-    buffer << condI1 << " = icmp ne i32 " << lastReg << ", 0\n";
+    std::string condI1 = toI1FromI32(lastReg, buffer);
     std::string thenLabel = buffer.freshLabel();
     std::string elseLabel = buffer.freshLabel();
     std::string endLabel = buffer.freshLabel();
@@ -536,8 +551,7 @@ void CodeGenVisitor::visit(ast::While &node) {
     emitLabel(condLabel);
 
     node.condition->accept(*this);
-    string condI1 = buffer.freshVar();
-    buffer << condI1 << " = icmp ne i32 " << lastReg << ", 0\n";
+    string condI1 = toI1FromI32(lastReg, buffer);
     emitCondBr(condI1, bodyLabel, endLabel);
     
     emitLabel(bodyLabel);
@@ -574,6 +588,8 @@ void CodeGenVisitor::visit(ast::VarDecl &node) {
     string varReg = buffer.freshVar();
     buffer << varReg << " = getelementptr [50 x i32], [50 x i32]* %locals, i32 0, i32 "
            << varInfo.offset << "\n";
+           
+    currentScope->varToReg[node.id->value] = varReg;
 
     string initVal = "0";
     if (node.init_exp) {
@@ -582,12 +598,16 @@ void CodeGenVisitor::visit(ast::VarDecl &node) {
         if(varInfo.type == ast::BuiltInType::BYTE) {
             initVal = maskByte(initVal, buffer);
         }
+        if(varInfo.type == ast::BuiltInType::BOOL) {
+            std::string c = toI1FromI32(initVal, buffer);
+            std::string z = buffer.freshVar();
+            buffer << z << " = zext i1 " << c << " to i32\n";
+            initVal = z;
+        }
     }
 
     buffer << "store i32 " << initVal << ", i32* " << varReg << "\n";
 
-    /*what is this??*/
-    currentScope->varToReg[node.id->value] = varReg;
 }
 
 
@@ -610,7 +630,13 @@ void CodeGenVisitor::visit(ast::Assign &node) {
     if(result.type == ast::BuiltInType::BYTE) {
         expReg = maskByte(expReg, buffer);
     }
-    string varReg = currentScope->varToReg[id];
+    if(result.type == ast::BuiltInType::BOOL) {
+        std::string c = toI1FromI32(expReg, buffer);
+        std::string z = buffer.freshVar();
+        buffer << z << " = zext i1 " << c << " to i32\n";
+        expReg = z;
+    }
+    string varReg = currentScope->findVarReg(id);
     buffer << "store i32 " << expReg << ", i32* " << varReg << "\n";
     
 }
@@ -638,39 +664,66 @@ void CodeGenVisitor::visit(ast::Formals &node) {
 }
 
 void CodeGenVisitor::visit(ast::FuncDecl &node) {
-    currentScope = make_shared<GenCodeScope>(currentScope->parentScope);
-    blockTerminated = false;
-    loopStack.clear();
-    lastReg = "";
-    lastType = ast::BuiltInType::VOID;
-    const string &func_name = node.id->value;
-    auto func = currentScope->funcsMap[func_name];
-    if(func.ret != ast::BuiltInType::VOID) {
-        buffer << "define i32 @" << func_name << "(";
-    } else {
-        buffer << "define void @" << func_name << "(";
-    }
-    std::vector<std::pair<string, ast::BuiltInType>> paramRegs;
-    if(node.formals) {
-        for(size_t i = 0; i < node.formals->formals.size(); i++) {
-            if(i > 0) {
-                buffer << ", ";
-            }
-            ast::BuiltInType paramType = node.formals->formals[i]->type->type;
-            string paramReg = buffer.freshVar();
-            paramRegs.push_back({paramReg, paramType});
-            if(paramType == ast::BuiltInType::INT) {
-                buffer << "i32 " << paramReg;
-            } else if(paramType == ast::BuiltInType::STRING) {
-                buffer << "i8* " << paramReg;
-            }
+    auto prevScope = currentScope;
+    currentScope = make_shared<GenCodeScope>(prevScope);
+    currentScope->offset = 0;
+
+    string fname = node.id->value;
+    ast::BuiltInType retType = node.return_type->type;
+
+    vector<ast::BuiltInType> paramTypes;
+    vector<string> paramNames;
+    if (node.formals) {
+        for(const auto &formal : node.formals->formals) {
+            paramTypes.push_back(formal->type->type);
+            paramNames.push_back(formal->id->value);
         }
     }
-    buffer << ") {\n";
+
+    string formalsStr;
+    for (size_t i = 0; i < paramTypes.size(); i++) {
+        if (i) formalsStr += ", ";
+        formalsStr += "i32 %" + paramNames[i];
+    }
+
+    buffer << "define " << llvmRetTy(retType) << " @" << fname << "(" << formalsStr << ") {\n";
+
+    string entryLabel = buffer.freshLabel();
+    emitLabel(entryLabel);
+
     buffer << "%locals = alloca [50 x i32]\n";
+
+    for(size_t i = 0; i < paramNames.size(); i++) {
+        string pname = paramNames[i];
+        ast::BuiltInType ptype = paramTypes[i];
+
+        
+        int off = currentScope->offset++;
+
+        string varReg = buffer.freshVar();
+        buffer << varReg << " = getelementptr [50 x i32], [50 x i32]* %locals, i32 0, i32 "
+                << off << "\n";
+
+        // Store parameter value to stack
+        string storeVal = "%" + pname;
+        if (ptype == ast::BuiltInType::BOOL) {
+            // Convert i32 parameter to proper bool representation
+            std::string c = toI1FromI32(storeVal, buffer);
+            std::string z = buffer.freshVar();
+            buffer << z << " = zext i1 " << c << " to i32\n";
+            storeVal = z;
+        }
+        buffer << "store i32 " << storeVal << ", i32* " << varReg << "\n";
+
+        currentScope->varsMap[pname] = GenCodeScope::VarInfo{ptype, off};
+        currentScope->varToReg[pname] = varReg;
+        
+    }
+
+    blockTerminated = false;
     node.body->accept(*this);
-    if(!blockTerminated) {
-        if(func.ret == ast::BuiltInType::VOID) {
+    if(canEmit()) {
+        if(retType == ast::BuiltInType::VOID) {
             buffer << "ret void\n";
         } else {
             buffer << "ret i32 0\n";
@@ -679,7 +732,7 @@ void CodeGenVisitor::visit(ast::FuncDecl &node) {
     }
     buffer << "}\n\n";
 
-    currentScope = currentScope->parentScope;
+    currentScope = prevScope;
 }
 
 void CodeGenVisitor::emitHelperFunctions() {

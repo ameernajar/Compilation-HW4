@@ -59,6 +59,15 @@ public:
             return parentScope->find(id);
         return resultFound{ast::BuiltInType::VOID, false, IdType::VAR, Info{nullptr, nullptr}};
     }
+
+    string findVarReg(const string &id) {
+        if (varToReg.find(id) != varToReg.end())
+            return varToReg[id];
+        if (parentScope)
+            return parentScope->findVarReg(id);
+        return "";
+    }
+    
 };
 
 class CodeGenVisitor : public Visitor {
