@@ -46,8 +46,8 @@ public:
     bool isLoopScope = false;
     int offset = 0; // for variables' offsets
     GenCodeScope(shared_ptr<GenCodeScope> parentScope) : funcsMap(), varsMap(),
-                                           parentScope(parentScope),
-                                           isLoopScope(parentScope ? parentScope->isLoopScope : false) {}
+                                                         parentScope(parentScope),
+                                                         isLoopScope(parentScope ? parentScope->isLoopScope : false) {}
 
     // ---------------------------methods---------------------------------
     resultFound find(const string &id) {
@@ -67,7 +67,6 @@ public:
             return parentScope->findVarReg(id);
         return "";
     }
-    
 };
 
 class CodeGenVisitor : public Visitor {
@@ -150,15 +149,15 @@ public:
     std::vector<std::pair<std::string, std::string>> loopStack;
 
     // helpers
-    void emitLabel(const std::string& labelName);
+    void emitLabel(const std::string &labelName);
 
-    void emitBr(const std::string& labelName);
+    void emitBr(const std::string &labelName);
 
-    void emitCondBr(const std::string& condI1, const std::string& trueLabel, const std::string& falseLabel);
+    void emitCondBr(const std::string &condI1, const std::string &trueLabel, const std::string &falseLabel);
 
     bool canEmit() const { return !blockTerminated; }
 
     void emitHelperFunctions();
 
-    //void collectFuncDecls(ast::Funcs& root);
+    void collectFuncDecls(ast::Funcs &root);
 };

@@ -1,44 +1,41 @@
 #ifndef VISITOR_HPP
 #define VISITOR_HPP
 
-enum IdType
-{
+enum IdType {
     VAR,
     FUNC
 };
 
-namespace ast
-{
-    class Num;
-    class NumB;
-    class String;
-    class Bool;
-    class ID;
-    class BinOp;
-    class RelOp;
-    class Not;
-    class And;
-    class Or;
-    class Type;
-    class Cast;
-    class ExpList;
-    class Call;
-    class Statements;
-    class Break;
-    class Continue;
-    class Return;
-    class If;
-    class While;
-    class VarDecl;
-    class Assign;
-    class Formal;
-    class Formals;
-    class FuncDecl;
-    class Funcs;
-}
+namespace ast {
+class Num;
+class NumB;
+class String;
+class Bool;
+class ID;
+class BinOp;
+class RelOp;
+class Not;
+class And;
+class Or;
+class Type;
+class Cast;
+class ExpList;
+class Call;
+class Statements;
+class Break;
+class Continue;
+class Return;
+class If;
+class While;
+class VarDecl;
+class Assign;
+class Formal;
+class Formals;
+class FuncDecl;
+class Funcs;
+} // namespace ast
 
-class Visitor
-{
+class Visitor {
 public:
     virtual void visit(ast::Num &node) = 0;
 
