@@ -404,16 +404,14 @@ void CodeGenVisitor::visit(ast::Call &node) {
     }
     buffer << "call ";
     switch (funcInfo.ret) {
-    case ast::BuiltInType::INT:
-        buffer << "i32 ";
-        break;
     case ast::BuiltInType::STRING:
         buffer << "i8* ";
         break;
+    default:
+        buffer << "i32 ";
+        break;
     case ast::BuiltInType::VOID:
         buffer << "void ";
-        break;
-    default:
         break;
     }
     buffer << "@" << node.func_id->value << "(";
@@ -444,9 +442,6 @@ void CodeGenVisitor::visit(ast::Statements &node) {
 
     /*didn't know what to do here*/
     for (const auto &statement : node.statements) {
-        if (!canEmit()) {
-            break;
-        }
         visitStatement(*statement);
     }
 }

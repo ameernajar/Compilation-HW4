@@ -24,7 +24,7 @@ using namespace std;
 %token SC COMMA LPAREN RPAREN LBRACE RBRACE ASSIGN
 %token VOID INT BYTE BOOL AND OR NOT TRUE FALSE RETURN IF ELSE WHILE BREAK CONTINUE
 %token RELOP
-%token BINOP
+%token BINOP MULDIV ADDSUB
 %token NUM NUM_B STRING
 %token ID
 
@@ -35,6 +35,8 @@ using namespace std;
 %left OR
 %left AND
 %nonassoc RELOP
+%left ADDSUB
+%left MULDIV
 %left BINOP
 %right NOT
 %nonassoc LPAREN RPAREN
@@ -88,7 +90,13 @@ Type: INT { $$ = make_shared<ast::Type>(ast::BuiltInType::INT); }
         | BYTE { $$ = make_shared<ast::Type>(ast::BuiltInType::BYTE); }
         | BOOL { $$ = make_shared<ast::Type>(ast::BuiltInType::BOOL); }
     ;
-Exp: Exp BINOP Exp {
+Exp: Exp MULDIV Exp {
+            $$ = make_shared<ast::BinOp>(dynamic_pointer_cast<ast::Exp>($1), dynamic_pointer_cast<ast::Exp>($3), dynamic_pointer_cast<ast::BinOp>($2)->op);
+        }
+        | Exp ADDSUB Exp {
+            $$ = make_shared<ast::BinOp>(dynamic_pointer_cast<ast::Exp>($1), dynamic_pointer_cast<ast::Exp>($3), dynamic_pointer_cast<ast::BinOp>($2)->op);
+        }
+        | Exp BINOP Exp {
             $$ = make_shared<ast::BinOp>(dynamic_pointer_cast<ast::Exp>($1), dynamic_pointer_cast<ast::Exp>($3), dynamic_pointer_cast<ast::BinOp>($2)->op);
         }
         | ID { $$ = dynamic_pointer_cast<ast::ID>($1); }

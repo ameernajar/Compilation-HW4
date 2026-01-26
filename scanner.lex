@@ -67,16 +67,16 @@ NUM_B {NUM}b
     switch(yytext[0]) {
         case '+':
             yylval = make_shared<ast::BinOp>(nullptr, nullptr, ast::BinOpType::ADD);
-            break;
+            return ADDSUB;
         case '-':
             yylval = make_shared<ast::BinOp>(nullptr, nullptr, ast::BinOpType::SUB);
-            break;
+            return ADDSUB;
         case '*':
             yylval = make_shared<ast::BinOp>(nullptr, nullptr, ast::BinOpType::MUL);
-            break;
+            return MULDIV;
         case '/':
             yylval = make_shared<ast::BinOp>(nullptr, nullptr, ast::BinOpType::DIV);
-            break;
+            return MULDIV;
     }
     return BINOP;
     }
